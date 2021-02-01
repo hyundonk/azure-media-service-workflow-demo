@@ -1,0 +1,10 @@
+{
+    "assetName": "demo8-0006912d-3f05-46a4-949a-4ed8a727434e",
+    "streamingPolicyName": "Predefined_ClearStreamingOnly",
+    "alternative-media-id": "mytestmedia02",
+    "contentKeyPolicyName": "defaultContentKeyPolicy",
+    "contentKeys": null,
+    "startDateTime": "2021-01-31T09:00Z",
+    "endDateTime": "2021-02-07T23:59Z",
+    "streamingLocatorId": "f1c651dc-f42a-46b8-9e64-4e2919421f22"
+}

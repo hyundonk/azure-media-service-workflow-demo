@@ -1,0 +1,247 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "workflows_name": {
+            "type": "String"
+        },
+        "location": {
+            "type": "String"
+        },
+        "sites_amsv3functions_id": {
+            "type": "String"
+        }
+    },
+    "variables": {
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('workflows_name')]",
+            "location": "[parameters('location')]",
+            "tags": {
+                "displayName": "LogicApp"
+            },
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {},
+                    "triggers": {
+                        "manual": {
+                            "type": "Request",
+                            "kind": "Http",
+                            "inputs": {
+                                "schema": {
+                                    "properties": {
+                                        "alternative-media-id": {
+                                            "type": "string"
+                                        },
+                                        "assetName": {
+                                            "type": "string"
+                                        },
+                                        "contentKeyPolicyName": {
+                                            "type": "string"
+                                        },
+                                        "endDateTime": {
+                                            "type": "string"
+                                        },
+                                        "startDateTime": {
+                                            "type": "string"
+                                        },
+                                        "streamingEndpointName": {
+                                            "type": "string"
+                                        },
+                                        "streamingLocatorId": {
+                                            "type": "string"
+                                        },
+                                        "streamingPolicyName": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "type": "object"
+                                },
+                                "method": "POST"
+                            },
+                            "conditions": []
+                        }
+                    },
+                    "actions": {
+                        "GetAssetUrls": {
+                            "runAfter": {
+                                "Parse_JSON_-_PublishAsset": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Function",
+                            "inputs": {
+                                "body": {
+                                    "streamingEndpointName": "@{if(equals(triggerBody()?['streamingEndpointName'],null),'default',triggerBody()?['streamingEndpointName'])}",
+                                    "streamingLocatorName": "@{body('Parse_JSON_-_PublishAsset')?['streamingLocatorName']}",
+                                    "streamingUrlScheme": "https"
+                                },
+                                "function": {
+                                    "id": "[concat(parameters('sites_amsv3functions_id'), '/functions/GetAssetUrls')]"
+                                }
+                            }
+                        },
+                        "Initialize_variable_-_alternative-media-id": {
+                            "runAfter": {
+                                "Initialize_variable_-_endDateTime": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "alternative-media-id",
+                                        "type": "string",
+                                        "value": "@{if(equals(triggerBody()?['alternative-media-id'],null),'',concat('\"alternative-media-id\": \"',triggerBody()?['alternative-media-id'],'\",'))}"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_contentKeyPolicyName": {
+                            "runAfter": {
+                                "Initialize_variable_-_alternative-media-id": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "contentKeyPolicyName",
+                                        "type": "string",
+                                        "value": "@{if(equals(triggerBody()?['_contentKeyPolicyName'],null),'',concat('\"contentKeyPolicyName\": \"',triggerBody()?['_contentKeyPolicyName'],'\",'))}"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_contentKeys": {
+                            "runAfter": {
+                                "Initialize_variable_-_contentKeyPolicyName": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "contentKeys",
+                                        "type": "string",
+                                        "value": "\"contentKeys\": null,"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_endDateTime": {
+                            "runAfter": {
+                                "Initialize_variable_-_startDateTime": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "endDateTime",
+                                        "type": "string",
+                                        "value": "\"endDateTime\": \"@{ if(equals(triggerBody()?['endDateTime'],null),formatDateTime(addDays(utcNow(),365),'yyyy-MM-ddTHH:mmZ'),triggerBody()?['endDateTime'])}\","
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_startDateTime": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "startDateTime",
+                                        "type": "string",
+                                        "value": "\"startDateTime\": \"@{ if(equals(triggerBody()?['startDateTime'],null),formatDateTime(utcNow(),'yyyy-MM-ddTHH:mmZ'),triggerBody()?['startDateTime'])}\","
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_streamingLocatorId": {
+                            "runAfter": {
+                                "Initialize_variable_-_contentKeys": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "streamingLocatorId",
+                                        "type": "string",
+                                        "value": "@{if(equals(triggerBody()?['streamingLocatorId'],null),'',concat('\"streamingLocatorId\": \"',triggerBody()?['streamingLocatorId'],'\",'))}"
+                                    }
+                                ]
+                            }
+                        },
+                        "Parse_JSON_-_PublishAsset": {
+                            "runAfter": {
+                                "PublishAsset": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ParseJson",
+                            "inputs": {
+                                "content": "@body('PublishAsset')",
+                                "schema": {
+                                    "properties": {
+                                        "streamingLocatorId": {
+                                            "type": "string"
+                                        },
+                                        "streamingLocatorName": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "PublishAsset": {
+                            "runAfter": {
+                                "Initialize_variable_-_streamingLocatorId": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Function",
+                            "inputs": {
+                                "body": "@concat(\r\n  '{\"assetName\": \"',\r\n  triggerBody()?['assetName'],\r\n  '\",',\r\n  variables('endDateTime'),\r\n  variables('startDateTime'),\r\n  variables('alternative-media-id'),\r\n  variables('contentKeyPolicyName'),\r\n  variables('contentKeys'),\r\n  variables('streamingLocatorId'),\r\n  '\"streamingPolicyName\": \"',\r\n  triggerBody()?['streamingPolicyName'],\r\n  '\"}')",
+                                "function": {
+                                    "id": "[concat(parameters('sites_amsv3functions_id'), '/functions/PublishAsset')]"
+                                }
+                            }
+                        },
+                        "Response": {
+                            "runAfter": {
+                                "GetAssetUrls": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Response",
+                            "kind": "Http",
+                            "inputs": {
+                                "statusCode": "@outputs('GetAssetUrls')['statusCode']",
+                                "headers": {
+                                    "Content-Type": "application/json"
+                                },
+                                "body": "@body('GetAssetUrls')"
+                            }
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {}
+            }
+        }
+    ]
+}

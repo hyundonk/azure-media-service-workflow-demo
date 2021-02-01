@@ -1,0 +1,883 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "workflows_name": {
+            "type": "String"
+        },
+        "location": {
+            "type": "String"
+        },
+        "sites_amsv3functions_id": {
+            "type": "String"
+        },
+        "azureBlobConnectionName": {
+            "type": "String"
+        },
+        "azureBlobAccountName": {
+            "type": "String"
+        },
+        "azureBlobAccessKey": {
+            "type": "SecureString"
+        },
+        "mediaServiceStorageName": {
+            "type": "String"
+        },
+        "mediaServiceAccountName": {
+            "type": "String"
+        },
+        "mediaServiceResourceGroupName": {
+            "type": "String"
+        }
+ 
+    },
+    "variables": {},
+    "resources": [
+    {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2018-07-01-preview",
+            "location": "[parameters('location')]",
+            "name": "[parameters('azureBlobConnectionName')]",
+            "properties": {
+              "api": {
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azureblob')]"
+              },
+              "displayName": "azureblob",
+              "parameterValues": {
+                "accountName": "[parameters('azureBlobAccountName')]",
+                "accessKey": "[parameters('azureBlobAccessKey')]"
+              }
+            }
+    },
+    {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('workflows_name')]",
+            "location": "[parameters('location')]",
+            "tags": {
+                "displayName": "LogicApp"
+            },
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        }
+                    },
+                    "triggers": {
+                        "When_a_blob_is_added_or_modified_(properties_only)": {
+                            "recurrence": {
+                                "frequency": "Second",
+                                "interval": 30
+                            },
+                            "splitOn": "@triggerBody()",
+                            "metadata": {
+                                "JTJmbWV6emFuaW5l": "/mezzanine"
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                    }
+                                },
+                                "method": "get",
+                                "path": "/datasets/default/triggers/batch/onupdatedfile",
+                                "queries": {
+                                    "folderId": "JTJmbWV6emFuaW5l",
+                                    "maxFileCount": 100
+                                }
+                            }
+                        }
+                    },
+                    "actions": {
+                        "Compose_-_Asset_Prefix": {
+                            "runAfter": {
+                                "Initialize_variable_-_processlog": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@replace(replace(triggerBody()?['Name'],' ',''),'.mp4','')"
+                        },
+                        "Compose_Log": {
+                            "runAfter": {
+                                "For_each_copied_asset": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": "@variables('processlog')"
+                        },
+                        "CreateEmptyAsset": {
+                            "runAfter": {
+                                "Initialize_variable": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Function",
+                            "inputs": {
+                                "body": {
+                                    "assetDescription": "@{triggerBody()?['Name']}",
+                                    "assetNamePrefix": "@{outputs('Compose_-_Asset_Prefix')}",
+                                    "assetStorageAccount": "@{variables('mediaServiceStorageName')}"
+                                },
+                                "function": {
+                                    "id": "[concat(parameters('sites_amsv3functions_id'), '/functions/CreateEmptyAsset')]"
+                                }
+                            }
+                        },
+                        "Create_Log_File": {
+                            "runAfter": {
+                                "Compose_Log": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "body": "@outputs('Compose_Log')",
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/datasets/default/files",
+                                "queries": {
+                                    "folderPath": "/mezzanine-processlogs",
+                                    "name": "processlog-@{formatDateTime(utcNow(),'yyyyMMdd-hhmmss')}.log",
+                                    "queryParametersSingleEncoded": true
+                                }
+                            },
+                            "runtimeConfiguration": {
+                                "contentTransfer": {
+                                    "transferMode": "Chunked"
+                                }
+                            }
+                        },
+                        "For_each_copied_asset": {
+                            "foreach": "@body('Parse_JSON_-_MonitorBlobContainerCopyStatus')?['blobCopyStatusList']",
+                            "actions": {
+                                "Condition": {
+                                    "actions": {
+                                        "CreateTransform": {
+                                            "runAfter": {
+                                                "Log:_Copy_success": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Function",
+                                            "inputs": {
+                                                "body": {
+                                                    "audioLanguage": "en-US",
+                                                    "description": "Transform for @{variables('encodingPreset')} preset",
+                                                    "insightsToExtract": "AllInsights",
+                                                    "mode": "simple",
+                                                    "onError": "StopProcessingJob",
+                                                    "preset": "@{variables('encodingPreset')}",
+                                                    "relativePriority": "Normal",
+                                                    "transformName": "StandardEncoder-@{variables('encodingPreset')}"
+                                                },
+                                                "function": {
+                                                    "id": "[concat(parameters('sites_amsv3functions_id'), '/functions/CreateTransform')]"
+                                                }
+                                            }
+                                        },
+                                        "Create_blob": {
+                                            "runAfter": {
+                                                "Log:_Encoding_complete": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "body": "@body('Get_blob_content')",
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "path": "/datasets/default/files",
+                                                "queries": {
+                                                    "folderPath": "/@{variables('sourceStorageProcessedContainer')}",
+                                                    "name": "@triggerBody()?['Name']",
+                                                    "queryParametersSingleEncoded": true
+                                                }
+                                            },
+                                            "runtimeConfiguration": {
+                                                "contentTransfer": {
+                                                    "transferMode": "Chunked"
+                                                }
+                                            }
+                                        },
+                                        "Delete_blob": {
+                                            "runAfter": {
+                                                "Create_blob": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "delete",
+                                                "path": "/datasets/default/files/@{encodeURIComponent(encodeURIComponent(triggerBody()?['Path']))}"
+                                            }
+                                        },
+                                        "Log:_Blob_moved_to_processed_folder": {
+                                            "runAfter": {
+                                                "Delete_blob": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "AppendToStringVariable",
+                                            "inputs": {
+                                                "name": "processlog",
+                                                "value": "Media file @{triggerBody()?['Name']} moved to the @{variables('sourceStorageProcessedContainer')} container.\n"
+                                            }
+                                        },
+                                        "Log:_Copy_success": {
+                                            "runAfter": {},
+                                            "type": "AppendToStringVariable",
+                                            "inputs": {
+                                                "name": "processlog",
+                                                "value": "Copy of asset @{triggerBody()?['Name']} to @{body('Parse_JSON_-_Create_Empty_Asset')?['assetName']} successful.\n"
+                                            }
+                                        },
+                                        "Log:_Encoding_complete": {
+                                            "runAfter": {
+                                                "Until_MediaJob_Encoding_is_complete": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "AppendToStringVariable",
+                                            "inputs": {
+                                                "name": "processlog",
+                                                "value": "Encoding of @{triggerBody()?['Name']} with asset name @{body('Parse_JSON_-_Create_Empty_Asset')?['assetName']} to @{variables('encodingPreset')} completed.\n"
+                                            }
+                                        },
+                                        "Parse_JSON_-_CreateTransform": {
+                                            "runAfter": {
+                                                "CreateTransform": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ParseJson",
+                                            "inputs": {
+                                                "content": "@body('CreateTransform')",
+                                                "schema": {
+                                                    "properties": {
+                                                        "transformId": {
+                                                            "type": "string"
+                                                        },
+                                                        "transformName": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            }
+                                        },
+                                        "Parse_JSON_-_SubmitMediaJob": {
+                                            "runAfter": {
+                                                "SubmitMediaJob": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ParseJson",
+                                            "inputs": {
+                                                "content": "@body('SubmitMediaJob')",
+                                                "schema": {
+                                                    "properties": {
+                                                        "audioAnalyzerOutputAssetName": {
+                                                            "type": [
+                                                                "string",
+                                                                "null"
+                                                            ]
+                                                        },
+                                                        "encoderOutputAssetName": {
+                                                            "type": "string"
+                                                        },
+                                                        "jobName": {
+                                                            "type": "string"
+                                                        },
+                                                        "videoAnalyzerOutputAssetName": {
+                                                            "type": [
+                                                                "string",
+                                                                "null"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            }
+                                        },
+                                        "Set_variable_isMediaProcessed_=_true": {
+                                            "runAfter": {
+                                                "Log:_Blob_moved_to_processed_folder": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "SetVariable",
+                                            "inputs": {
+                                                "name": "isMediaProcessed",
+                                                "value": true
+                                            }
+                                        },
+                                        "SubmitMediaJob": {
+                                            "runAfter": {
+                                                "Parse_JSON_-_CreateTransform": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "Function",
+                                            "inputs": {
+                                                "body": {
+                                                    "assetStorageAccount": "@{variables('mediaServiceStorageName')}",
+                                                    "inputAssetName": "@{body('Parse_JSON_-_Create_Empty_Asset')?['assetName']}",
+                                                    "outputAssetDescription": "@{triggerBody()?['Name']} - @{variables('encodingPreset')}",
+                                                    "outputAssetNamePrefix": "@{outputs('Compose_-_Asset_Prefix')}",
+                                                    "transformName": "@{body('Parse_JSON_-_CreateTransform')?['transformName']}"
+                                                },
+                                                "function": {
+                                                    "id": "[concat(parameters('sites_amsv3functions_id'), '/functions/SubmitMediaJob')]"
+                                                }
+                                            }
+                                        },
+                                        "Until_MediaJob_Encoding_is_complete": {
+                                            "actions": {
+                                                "Delay_5_seconds": {
+                                                    "runAfter": {},
+                                                    "type": "Wait",
+                                                    "inputs": {
+                                                        "interval": {
+                                                            "count": 5,
+                                                            "unit": "Second"
+                                                        }
+                                                    }
+                                                },
+                                                "MonitorMediaJob": {
+                                                    "runAfter": {
+                                                        "Delay_5_seconds": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Function",
+                                                    "inputs": {
+                                                        "body": {
+                                                            "jobName": "@{body('Parse_JSON_-_SubmitMediaJob')?['jobName']}",
+                                                            "transformName": "@{body('Parse_JSON_-_CreateTransform')?['transformName']}"
+                                                        },
+                                                        "function": {
+                                                            "id": "[concat(parameters('sites_amsv3functions_id'), '/functions/MonitorMediaJob')]"
+                                                        }
+                                                    },
+                                                    "operationOptions": "DisableAsyncPattern"
+                                                },
+                                                "Parse_JSON_-_MonitorMediaJob": {
+                                                    "runAfter": {
+                                                        "MonitorMediaJob": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "ParseJson",
+                                                    "inputs": {
+                                                        "content": "@body('MonitorMediaJob')",
+                                                        "schema": {
+                                                            "properties": {
+                                                                "jobOutputStateList": {
+                                                                    "items": {
+                                                                        "properties": {
+                                                                            "AssetName": {
+                                                                                "type": "string"
+                                                                            },
+                                                                            "Progress": {
+                                                                                "type": "integer"
+                                                                            },
+                                                                            "State": {
+                                                                                "type": "string"
+                                                                            }
+                                                                        },
+                                                                        "required": [
+                                                                            "AssetName",
+                                                                            "State",
+                                                                            "Progress"
+                                                                        ],
+                                                                        "type": "object"
+                                                                    },
+                                                                    "type": "array"
+                                                                },
+                                                                "jobStatus": {
+                                                                    "type": "string"
+                                                                }
+                                                            },
+                                                            "type": "object"
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Parse_JSON_-_SubmitMediaJob": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "expression": "@equals(body('Parse_JSON_-_MonitorMediaJob')?['jobStatus'], 'Finished')",
+                                            "limit": {
+                                                "count": 5000,
+                                                "timeout": "PT5H"
+                                            },
+                                            "type": "Until"
+                                        }
+                                    },
+                                    "runAfter": {},
+                                    "else": {
+                                        "actions": {
+                                            "DeleteAsset": {
+                                                "runAfter": {
+                                                    "Log:_Copy_failure": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "type": "Function",
+                                                "inputs": {
+                                                    "body": {
+                                                        "accountName": "@{variables('mediaServiceAccountName')}",
+                                                        "assetName": "@{body('Parse_JSON_-_Create_Empty_Asset')?['assetName']}",
+                                                        "resourceGroup": "@{variables('resourceGroup')}"
+                                                    },
+                                                    "function": {
+                                                        "id": "[concat(parameters('sites_amsv3functions_id'), '/functions/DeleteAsset')]"
+                                                    }
+                                                }
+                                            },
+                                            "Log:_Asset_Deleted": {
+                                                "runAfter": {
+                                                    "DeleteAsset": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "type": "AppendToStringVariable",
+                                                "inputs": {
+                                                    "name": "processlog",
+                                                    "value": "Asset @{body('Parse_JSON_-_Create_Empty_Asset')?['assetName']} deleted.\n"
+                                                }
+                                            },
+                                            "Log:_Copy_failure": {
+                                                "runAfter": {},
+                                                "type": "AppendToStringVariable",
+                                                "inputs": {
+                                                    "name": "processlog",
+                                                    "value": "Copy of asset @{triggerBody()?['Name']} to @{body('Parse_JSON_-_Create_Empty_Asset')?['assetName']} failed. Skipping this file for the next batch run.\n"
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "expression": {
+                                        "and": [
+                                            {
+                                                "equals": [
+                                                    "@items('For_each_copied_asset')?['blobCopyStatus']",
+                                                    2
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "type": "If"
+                                }
+                            },
+                            "runAfter": {
+                                "Until_BlobContainerCopyStatus_is_complete": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Foreach"
+                        },
+                        "Get_blob_content": {
+                            "runAfter": {
+                                "Compose_-_Asset_Prefix": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                    }
+                                },
+                                "method": "get",
+                                "path": "/datasets/default/files/@{encodeURIComponent(encodeURIComponent(triggerBody()?['Path']))}/content",
+                                "queries": {
+                                    "inferContentType": true
+                                }
+                            }
+                        },
+                        "Initialize_variable": {
+                            "runAfter": {
+                                "Get_blob_content": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "sourceStorageAccountKey",
+                                        "type": "string",
+                                        "value": "[parameters('azureBlobAccessKey')]"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_Media_Service_Account_Name": {
+                            "runAfter": {
+                                "Initialize_variable_-_encodingPreset": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "mediaServiceAccountName",
+                                        "type": "string",
+                                        "value": "[parameters('mediaServiceAccountName')]"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_Media_Service_Resource_Group": {
+                            "runAfter": {
+                                "Initialize_variable_-_Media_Service_Account_Name": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "resourceGroup",
+                                        "type": "string",
+                                        "value": "[parameters('mediaServiceResourceGroupName')]"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_encodingPreset": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "encodingPreset",
+                                        "type": "string",
+                                        "value": "H264MultipleBitrate1080p"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_isMediaProcessed": {
+                            "runAfter": {
+                                "Initialize_variable_-_mediaServiceStorageName": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "isMediaProcessed",
+                                        "type": "boolean",
+                                        "value": false
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_mediaServiceStorageName": {
+                            "runAfter": {
+                                "Initialize_variable_-_sourceStorageProcessedContainer": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "mediaServiceStorageName",
+                                        "type": "string",
+                                        "value": "[parameters('mediaServiceStorageName')]"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_processlog": {
+                            "runAfter": {
+                                "Initialize_variable_-_isMediaProcessed": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "processlog",
+                                        "type": "string",
+                                        "value": "Upload workflow run start on @{formatDateTime(utcNow(),'yyyy-MM-dd hh:mm:ss')}\n"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_sourceStorageContainer": {
+                            "runAfter": {
+                                "Initialize_variable_-_sourceStorageName": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "sourceStorageContainer",
+                                        "type": "string",
+                                        "value": "mezzanine"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_sourceStorageName": {
+                            "runAfter": {
+                                "Initialize_variable_-_Media_Service_Resource_Group": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "sourceStorageName",
+                                        "type": "string",
+                                        "value": "[parameters('azureBlobAccountName')]"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_-_sourceStorageProcessedContainer": {
+                            "runAfter": {
+                                "Initialize_variable_-_sourceStorageContainer": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "sourceStorageProcessedContainer",
+                                        "type": "string",
+                                        "value": "mezzanine-processed"
+                                    }
+                                ]
+                            }
+                        },
+                        "Log:_Empty_Asset_Created": {
+                            "runAfter": {
+                                "Parse_JSON_-_Create_Empty_Asset": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "AppendToStringVariable",
+                            "inputs": {
+                                "name": "processlog",
+                                "value": "Empty asset created: @{body('Parse_JSON_-_Create_Empty_Asset')?['assetName']}\n"
+                            }
+                        },
+                        "Parse_JSON_-_Create_Empty_Asset": {
+                            "runAfter": {
+                                "CreateEmptyAsset": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ParseJson",
+                            "inputs": {
+                                "content": "@body('CreateEmptyAsset')",
+                                "schema": {
+                                    "properties": {
+                                        "assetId": {
+                                            "type": "string"
+                                        },
+                                        "assetName": {
+                                            "type": "string"
+                                        },
+                                        "destinationContainer": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "Send_failure_if_media_was_not_processed": {
+                            "actions": {},
+                            "runAfter": {
+                                "Create_Log_File": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "else": {
+                                "actions": {
+                                    "Terminate": {
+                                        "runAfter": {},
+                                        "type": "Terminate",
+                                        "inputs": {
+                                            "runError": {
+                                                "message": "The media file @{triggerBody()?['Name']} was not processed successfully."
+                                            },
+                                            "runStatus": "Failed"
+                                        }
+                                    }
+                                }
+                            },
+                            "expression": {
+                                "and": [
+                                    {
+                                        "equals": [
+                                            "@variables('isMediaProcessed')",
+                                            true
+                                        ]
+                                    }
+                                ]
+                            },
+                            "type": "If"
+                        },
+                        "StartBlobContainerCopyToAsset": {
+                            "runAfter": {
+                                "Log:_Empty_Asset_Created": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Function",
+                            "inputs": {
+                                "body": {
+                                    "assetId": "@{body('Parse_JSON_-_Create_Empty_Asset')?['assetId']}",
+                                    "assetName": "@{body('Parse_JSON_-_Create_Empty_Asset')?['assetName']}",
+                                    "fileNames": [
+                                        "@{triggerBody()?['Name']}"
+                                    ],
+                                    "sourceContainer": "@{variables('sourceStorageContainer')}",
+                                    "sourceStorageAccountKey": "@{variables('sourceStorageAccountKey')}",
+                                    "sourceStorageAccountName": "@{variables('sourceStorageName')}"
+                                },
+                                "function": {
+                                    "id": "[concat(parameters('sites_amsv3functions_id'), '/functions/StartBlobContainerCopyToAsset')]"
+                                }
+                            }
+                        },
+                        "Until_BlobContainerCopyStatus_is_complete": {
+                            "actions": {
+                                "Delay_3_seconds": {
+                                    "runAfter": {},
+                                    "type": "Wait",
+                                    "inputs": {
+                                        "interval": {
+                                            "count": 3,
+                                            "unit": "Second"
+                                        }
+                                    }
+                                },
+                                "MonitorBlobContainerCopyStatus": {
+                                    "runAfter": {
+                                        "Delay_3_seconds": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Function",
+                                    "inputs": {
+                                        "body": {
+                                            "assetName": "@{body('Parse_JSON_-_Create_Empty_Asset')?['assetName']}",
+                                            "fileNames": [
+                                                "@{triggerBody()?['Name']}"
+                                            ]
+                                        },
+                                        "function": {
+                                            "id": "[concat(parameters('sites_amsv3functions_id'), '/functions/MonitorBlobContainerCopyStatus')]"
+                                        }
+                                    },
+                                    "operationOptions": "DisableAsyncPattern"
+                                },
+                                "Parse_JSON_-_MonitorBlobContainerCopyStatus": {
+                                    "runAfter": {
+                                        "MonitorBlobContainerCopyStatus": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "ParseJson",
+                                    "inputs": {
+                                        "content": "@body('MonitorBlobContainerCopyStatus')",
+                                        "schema": {
+                                            "properties": {
+                                                "blobCopyStatusList": {
+                                                    "items": {
+                                                        "properties": {
+                                                            "blobCopyStatus": {
+                                                                "type": "integer"
+                                                            },
+                                                            "blobName": {
+                                                                "type": "string"
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "blobName",
+                                                            "blobCopyStatus"
+                                                        ],
+                                                        "type": "object"
+                                                    },
+                                                    "type": "array"
+                                                },
+                                                "copyStatus": {
+                                                    "type": "boolean"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "StartBlobContainerCopyToAsset": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "expression": "@equals(body('Parse_JSON_-_MonitorBlobContainerCopyStatus')?['copyStatus'], true)",
+                            "limit": {
+                                "count": 5000,
+                                "timeout": "PT2H"
+                            },
+                            "type": "Until"
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "azureblob": {
+                                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azureblob')]",
+                                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('azureBlobConnectionName'))]"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}
