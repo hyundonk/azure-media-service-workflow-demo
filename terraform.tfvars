@@ -12,5 +12,5 @@ git_repository_url                     = "https://github.com/hyundonk/media-serv
 project                                 = "advanced-vod-workflow"
 
 # For demo only. Use Key Vault secret instead
-client_id     = "53b18e5d-ba32-4a78-951f-945d35826e82"
-client_secret = "~qIm0AM__O7LKeu.fQnVdJ0U6HlxdxXXMP"
+client_id     = "{replace this with your service principal client_id}"
+client_secret = "{replace this with your service principal client_secret}"
